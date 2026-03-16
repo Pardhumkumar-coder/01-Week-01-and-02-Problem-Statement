@@ -1,0 +1,96 @@
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
+
+public class DistributedRateLimiter {
+
+    private static class TokenBucket {
+        final long maxTokens;
+        final long refillRatePerMs;
+        
+        // AtomicReference ensures thread-safe updates to the bucket state
+        final AtomicReference<BucketState> state;
+
+        private static class BucketState {
+            final long tokens;
+            final long lastRefillTime;
+
+            BucketState(long tokens, long lastRefillTime) {
+                this.tokens = tokens;
+                this.lastRefillTime = lastRefillTime;
+            }
+        }
+
+        TokenBucket(long limitPerHour) {
+            this.maxTokens = limitPerHour;
+            // 1000 requests per hour -> tokens per millisecond
+            this.refillRatePerMs = limitPerHour / (60 * 60 * 1000L); 
+            this.state = new AtomicReference<>(new BucketState(limitPerHour, System.currentTimeMillis()));
+        }
+
+        public boolean tryConsume() {
+            while (true) {
+                long now = System.currentTimeMillis();
+                BucketState current = state.get();
+                
+                // Calculate how many tokens were generated since last access
+                long refill = (now - current.lastRefillTime) * refillRatePerMs;
+                long newTokens = Math.min(maxTokens, current.tokens + refill);
+
+                if (newTokens < 1) {
+                    return false; // Rate limit exceeded
+                }
+
+                // Attempt atomic update (Compare-And-Swap)
+                if (state.compareAndSet(current, new BucketState(newTokens - 1, now))) {
+                    return true;
+                }
+                // If CAS fails, another thread updated the state; loop and retry
+            }
+        }
+
+        public long getTokens() {
+            return state.get().tokens;
+        }
+
+        public long getResetTimeSeconds() {
+            // Seconds until the bucket would be completely full again
+            long missing = maxTokens - state.get().tokens;
+            return (missing / Math.max(1, refillRatePerMs)) / 1000;
+        }
+    }
+
+    private final ConcurrentHashMap<String, TokenBucket> clientLimits = new ConcurrentHashMap<>();
+    private final long DEFAULT_LIMIT = 1000;
+
+    public String checkRateLimit(String clientId) {
+        TokenBucket bucket = clientLimits.computeIfAbsent(clientId, k -> new TokenBucket(DEFAULT_LIMIT));
+
+        if (bucket.tryConsume()) {
+            return "Allowed (" + bucket.getTokens() + " requests remaining)";
+        } else {
+            return "Denied (0 requests remaining, retry after " + bucket.getResetTimeSeconds() + "s)";
+        }
+    }
+
+    public void getRateLimitStatus(String clientId) {
+        TokenBucket bucket = clientLimits.get(clientId);
+        if (bucket == null) {
+            System.out.println("No records for client: " + clientId);
+            return;
+        }
+        long used = DEFAULT_LIMIT - bucket.getTokens();
+        System.out.printf("{used: %d, limit: %d, reset_estimate: %ds}%n", 
+                          used, DEFAULT_LIMIT, bucket.getResetTimeSeconds());
+    }
+
+    public static void main(String[] args) {
+        DistributedRateLimiter limiter = new DistributedRateLimiter();
+        String user = "abc123";
+
+        // Simulate requests
+        System.out.println(limiter.checkRateLimit(user));
+        System.out.println(limiter.checkRateLimit(user));
+        
+        limiter.getRateLimitStatus(user);
+    }
+}

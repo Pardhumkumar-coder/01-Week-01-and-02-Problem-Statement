@@ -1,0 +1,112 @@
+import java.util.*;
+
+public class FraudDetectionSystem {
+
+    static class Transaction {
+        int id;
+        double amount;
+        String merchant;
+        long timestamp; // epoch seconds
+        String accountId;
+
+        Transaction(int id, double amount, String merchant, long timestamp, String accountId) {
+            this.id = id;
+            this.amount = amount;
+            this.merchant = merchant;
+            this.timestamp = timestamp;
+            this.accountId = accountId;
+        }
+    }
+
+    /**
+     * Classic Two-Sum: Finds pairs summing to target in O(n)
+     */
+    public List<String> findTwoSum(List<Transaction> transactions, double target) {
+        Map<Double, Transaction> seen = new HashMap<>();
+        List<String> pairs = new ArrayList<>();
+
+        for (Transaction tx : transactions) {
+            double complement = target - tx.amount;
+            if (seen.containsKey(complement)) {
+                pairs.add(String.format("Pair Found: ID %d and ID %d", seen.get(complement).id, tx.id));
+            }
+            seen.put(tx.amount, tx);
+        }
+        return pairs;
+    }
+
+    /**
+     * Duplicate Detection: Same amount and merchant, different accounts.
+     * Uses a composite key for O(1) grouping.
+     */
+    public void detectDuplicates(List<Transaction> transactions) {
+        // Key: "merchant:amount"
+        Map<String, List<Transaction>> groups = new HashMap<>();
+
+        for (Transaction tx : transactions) {
+            String key = tx.merchant + ":" + tx.amount;
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(tx);
+        }
+
+        System.out.println("\nDuplicate Analysis:");
+        for (List<Transaction> group : groups.values()) {
+            if (group.size() > 1) {
+                Set<String> accounts = new HashSet<>();
+                group.forEach(t -> accounts.add(t.accountId));
+                if (accounts.size() > 1) {
+                    System.out.printf("Alert: Merchant %s, Amount %.2f processed across %d accounts.%n",
+                            group.get(0).merchant, group.get(0).amount, accounts.size());
+                }
+            }
+        }
+    }
+
+    /**
+     * K-Sum: Recursive approach with memoization (O(n^(k-1)))
+     */
+    public List<List<Integer>> findKSum(List<Transaction> txs, double target, int k, int start) {
+        List<List<Integer>> result = new ArrayList<>();
+        if (start == txs.size()) return result;
+
+        if (k == 2) {
+            // Base case: Use Two-Sum logic
+            Map<Double, Integer> seen = new HashMap<>();
+            for (int i = start; i < txs.size(); i++) {
+                double comp = target - txs.get(i).amount;
+                if (seen.containsKey(comp)) {
+                    result.add(new ArrayList<>(Arrays.asList(seen.get(comp), txs.get(i).id)));
+                }
+                seen.put(txs.get(i).amount, txs.get(i).id);
+            }
+            return result;
+        }
+
+        for (int i = start; i < txs.size(); i++) {
+            List<List<Integer>> subRes = findKSum(txs, target - txs.get(i).amount, k - 1, i + 1);
+            for (List<Integer> list : subRes) {
+                list.add(0, txs.get(i).id);
+                result.add(list);
+            }
+        }
+        return result;
+    }
+
+    public static void main(String[] args) {
+        FraudDetectionSystem system = new FraudDetectionSystem();
+        List<Transaction> data = Arrays.asList(
+            new Transaction(1, 500, "Store A", 1000, "ACC-1"),
+            new Transaction(2, 300, "Store B", 1010, "ACC-2"),
+            new Transaction(3, 200, "Store C", 1020, "ACC-3"),
+            new Transaction(4, 500, "Store A", 1030, "ACC-4")
+        );
+
+        // 1. Two Sum
+        System.out.println(system.findTwoSum(data, 500));
+
+        // 2. Duplicates
+        system.detectDuplicates(data);
+
+        // 3. K-Sum (K=3)
+        System.out.println("\n3-Sum (Target 1000): " + system.findKSum(data, 1000, 3, 0));
+    }
+}

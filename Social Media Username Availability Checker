@@ -1,0 +1,25 @@
+public class UsernameSystem {
+    // Stores taken usernames
+    private Map<String, Long> userRegistry = new ConcurrentHashMap<>();
+    // Stores search counts
+    private Map<String, Integer> popularityTracker = new ConcurrentHashMap<>();
+
+    public boolean checkAvailability(String username) {
+        // Track the attempt regardless of availability
+        popularityTracker.merge(username, 1, Integer::sum);
+        return !userRegistry.containsKey(username);
+    }
+
+    public List<String> suggestAlternatives(String username) {
+        List<String> suggestions = new ArrayList<>();
+        int suffix = 1;
+        while (suggestions.size() < 3) {
+            String candidate = username + suffix;
+            if (!userRegistry.containsKey(candidate)) {
+                suggestions.add(candidate);
+            }
+            suffix++;
+        }
+        return suggestions;
+    }
+}

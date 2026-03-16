@@ -1,0 +1,53 @@
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+import java.util.stream.Collectors;
+
+public class RealTimeAnalytics {
+    private final ConcurrentHashMap<String, LongAdder> pageViews = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Set<String>> uniqueVisitors = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, LongAdder> trafficSources = new ConcurrentHashMap<>();
+    private final AtomicLong totalEvents = new AtomicLong(0);
+
+    public void processEvent(String url, String userId, String source) {
+        pageViews.computeIfAbsent(url, k -> new LongAdder()).increment();
+        
+        uniqueVisitors.computeIfAbsent(url, k -> ConcurrentHashMap.newKeySet()).add(userId);
+        
+        trafficSources.computeIfAbsent(source, k -> new LongAdder()).increment();
+        
+        totalEvents.incrementAndGet();
+    }
+
+    public void getDashboard() {
+        System.out.println("\n--- Real-Time Dashboard (Last 5s Refresh) ---");
+        
+        System.out.println("Top Pages:");
+        pageViews.entrySet().stream()
+                .sorted((e1, e2) -> Long.compare(e2.getValue().sum(), e1.getValue().sum()))
+                .limit(10)
+                .forEach(e -> {
+                    long views = e.getValue().sum();
+                    int uniques = uniqueVisitors.get(e.getKey()).size();
+                    System.out.printf("%s - %d views (%d unique)%n", e.getKey(), views, uniques);
+                });
+
+        long total = totalEvents.get();
+        System.out.println("\nTraffic Sources:");
+        trafficSources.forEach((source, count) -> {
+            double percentage = (count.sum() * 100.0) / total;
+            System.out.printf("%s: %.1f%%%n", source, percentage);
+        });
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        RealTimeAnalytics analytics = new RealTimeAnalytics();
+        
+        analytics.processEvent("/article/breaking-news", "user_123", "Google");
+        analytics.processEvent("/article/breaking-news", "user_456", "Facebook");
+        analytics.processEvent("/sports/championship", "user_789", "Direct");
+        analytics.processEvent("/article/breaking-news", "user_123", "Google");
+
+        analytics.getDashboard();
+    }
+}

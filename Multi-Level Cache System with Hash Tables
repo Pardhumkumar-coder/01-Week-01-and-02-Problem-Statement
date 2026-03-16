@@ -1,0 +1,121 @@
+import java.util.*;
+import java.util.concurrent.atomic.LongAdder;
+
+public class MultiLevelCacheSystem {
+
+    private static class CacheStats {
+        LongAdder hits = new LongAdder();
+        LongAdder misses = new LongAdder();
+        double latency;
+
+        CacheStats(double latency) { this.latency = latency; }
+
+        double getHitRate() {
+            long total = hits.sum() + misses.sum();
+            return total == 0 ? 0 : (hits.sum() / (double) total) * 100;
+        }
+    }
+
+    // Constants for levels
+    private final int L1_SIZE = 10000;
+    private final int L2_SIZE = 100000;
+    private final int PROMOTION_THRESHOLD = 5;
+
+    // Cache Tiers
+    private final Map<String, String> l1Cache; // Memory
+    private final Map<String, String> l2Cache; // SSD (Mocked)
+    private final Map<String, Integer> accessCounts = new HashMap<>(); // Promotion tracker
+
+    // Performance Metrics
+    private final CacheStats l1Stats = new CacheStats(0.5);
+    private final CacheStats l2Stats = new CacheStats(5.0);
+    private final CacheStats l3Stats = new CacheStats(150.0);
+
+    public MultiLevelCacheSystem() {
+        // L1 Cache with LRU eviction
+        this.l1Cache = Collections.synchronizedMap(new LinkedHashMap<String, String>(L1_SIZE, 0.75f, true) {
+            protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                return size() > L1_SIZE;
+            }
+        });
+
+        // L2 Cache with LRU eviction
+        this.l2Cache = Collections.synchronizedMap(new LinkedHashMap<String, String>(L2_SIZE, 0.75f, true) {
+            protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                return size() > L2_SIZE;
+            }
+        });
+    }
+
+    public String getVideo(String videoId) {
+        double totalLatency = 0;
+
+        // --- LEVEL 1 CHECK ---
+        if (l1Cache.containsKey(videoId)) {
+            l1Stats.hits.increment();
+            return String.format("L1 HIT (%.1fms) -> %s", l1Stats.latency, l1Cache.get(videoId));
+        }
+        l1Stats.misses.increment();
+        totalLatency += l1Stats.latency;
+
+        // --- LEVEL 2 CHECK ---
+        if (l2Cache.containsKey(videoId)) {
+            l2Stats.hits.increment();
+            totalLatency += l2Stats.latency;
+            
+            // Promotion Logic
+            int count = accessCounts.getOrDefault(videoId, 0) + 1;
+            accessCounts.put(videoId, count);
+            
+            String data = l2Cache.get(videoId);
+            if (count >= PROMOTION_THRESHOLD) {
+                l1Cache.put(videoId, data);
+                l2Cache.remove(videoId);
+                return String.format("L2 HIT (%.1fms) -> Promoted to L1 -> Total: %.1fms", l2Stats.latency, totalLatency);
+            }
+            return String.format("L2 HIT (%.1fms) -> Total: %.1fms", l2Stats.latency, totalLatency);
+        }
+        l2Stats.misses.increment();
+        totalLatency += l2Stats.latency;
+
+        // --- LEVEL 3 CHECK (Database) ---
+        l3Stats.hits.increment();
+        totalLatency += l3Stats.latency;
+        String videoData = "VideoStreamData_" + videoId; // Mocked DB fetch
+        
+        // Add to L2 as per requirements
+        l2Cache.put(videoId, videoData);
+        accessCounts.put(videoId, 1);
+
+        return String.format("L3 DB HIT (%.1fms) -> Added to L2 -> Total: %.1fms", l3Stats.latency, totalLatency);
+    }
+
+    public void getStatistics() {
+        System.out.println("\n--- Multi-Level Cache Statistics ---");
+        System.out.printf("L1: Hit Rate %.1f%%, Avg Time: %.1fms%n", l1Stats.getHitRate(), l1Stats.latency);
+        System.out.printf("L2: Hit Rate %.1f%%, Avg Time: %.1fms%n", l2Stats.getHitRate(), l2Stats.latency);
+        System.out.printf("L3: Hit Rate %.1f%%, Avg Time: %.1fms%n", l3Stats.getHitRate(), l3Stats.latency);
+        
+        long totalHits = l1Stats.hits.sum() + l2Stats.hits.sum() + l3Stats.hits.sum();
+        long totalRequests = totalHits + l3Stats.misses.sum(); // In this model, L3 always hits or fails the system
+        double overallHitRate = (totalRequests == 0) ? 0 : ((l1Stats.hits.sum() + l2Stats.hits.sum()) / (double) totalRequests) * 100;
+        System.out.printf("Overall Cache Efficiency: %.1f%%%n", overallHitRate);
+    }
+
+    public static void main(String[] args) {
+        MultiLevelCacheSystem netflix = new MultiLevelCacheSystem();
+
+        // Scenario 1: Fresh request
+        System.out.println(netflix.getVideo("video_123"));
+
+        // Scenario 2: Repeat until promotion
+        for (int i = 0; i < 5; i++) {
+            System.out.println(netflix.getVideo("video_123"));
+        }
+
+        // Scenario 3: Database fetch
+        System.out.println(netflix.getVideo("video_999"));
+
+        netflix.getStatistics();
+    }
+}

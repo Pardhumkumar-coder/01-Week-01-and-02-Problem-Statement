@@ -1,0 +1,102 @@
+import java.util.*;
+
+public class ParkingManagementSystem {
+    private enum Status { EMPTY, OCCUPIED, DELETED }
+
+    private static class ParkingSpot {
+        String licensePlate;
+        long entryTime;
+        Status status = Status.EMPTY;
+
+        void park(String plate) {
+            this.licensePlate = plate;
+            this.entryTime = System.currentTimeMillis();
+            this.status = Status.OCCUPIED;
+        }
+
+        void clear() {
+            this.status = Status.DELETED;
+            this.licensePlate = null;
+        }
+    }
+
+    private final int capacity;
+    private final ParkingSpot[] spots;
+    private int activeVehicles = 0;
+    private long totalProbes = 0;
+    private int totalParkings = 0;
+
+    public ParkingManagementSystem(int size) {
+        this.capacity = size;
+        this.spots = new ParkingSpot[size];
+        for (int i = 0; i < size; i++) {
+            spots[i] = new ParkingSpot();
+        }
+    }
+
+    private int hash(String licensePlate) {
+        // Simple hash to map license plate to a spot index
+        return Math.abs(licensePlate.hashCode()) % capacity;
+    }
+
+    public String parkVehicle(String licensePlate) {
+        if (activeVehicles >= capacity) return "Parking Lot Full!";
+
+        int preferredSpot = hash(licensePlate);
+        int currentSpot = preferredSpot;
+        int probes = 0;
+
+        // Linear Probing: spot, spot+1, spot+2...
+        while (spots[currentSpot].status == Status.OCCUPIED) {
+            currentSpot = (currentSpot + 1) % capacity;
+            probes++;
+        }
+
+        spots[currentSpot].park(licensePlate);
+        activeVehicles++;
+        totalProbes += probes;
+        totalParkings++;
+
+        return String.format("Assigned spot #%d (%d probes)", currentSpot, probes);
+    }
+
+    public String exitVehicle(String licensePlate, double hourlyRate) {
+        for (int i = 0; i < capacity; i++) {
+            if (spots[i].status == Status.OCCUPIED && licensePlate.equals(spots[i].licensePlate)) {
+                long durationMs = System.currentTimeMillis() - spots[i].entryTime;
+                double hours = Math.max(1, durationMs / (1000.0 * 3600.0));
+                double fee = hours * hourlyRate;
+
+                spots[i].clear();
+                activeVehicles--;
+                
+                return String.format("Spot #%d freed, Duration: %.2fh, Fee: $%.2f", i, hours, fee);
+            }
+        }
+        return "Vehicle not found.";
+    }
+
+    public void getStatistics() {
+        double occupancy = (activeVehicles / (double) capacity) * 100;
+        double avgProbes = totalParkings == 0 ? 0 : (double) totalProbes / totalParkings;
+        
+        System.out.println("\n--- Parking Statistics ---");
+        System.out.printf("Occupancy: %.1f%%%n", occupancy);
+        System.out.printf("Average Probes per Parking: %.2f%n", avgProbes);
+        System.out.println("Active Vehicles: " + activeVehicles);
+    }
+
+    public static void main(String[] args) {
+        ParkingManagementSystem lot = new ParkingManagementSystem(500);
+
+        // Simulate collisions by parking vehicles that might hash to same index
+        System.out.println(lot.parkVehicle("ABC-1234"));
+        System.out.println(lot.parkVehicle("ABC-1235"));
+        System.out.println(lot.parkVehicle("XYZ-9999"));
+
+        // Simulate an exit
+        System.out.println(lot.exitVehicle("ABC-1234", 5.50));
+
+        lot.getStatistics();
+    }
+}

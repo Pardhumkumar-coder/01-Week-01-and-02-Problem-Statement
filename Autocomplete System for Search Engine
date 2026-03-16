@@ -1,0 +1,100 @@
+import java.util.*;
+import java.util.concurrent.*;
+
+public class AutocompleteSystem {
+    
+    // Trie Node structure
+    private static class TrieNode {
+        // Maps character to the next node
+        Map<Character, TrieNode> children = new HashMap<>();
+        // Stores queries passing through this node and their frequencies
+        // In a production system, we'd only store the top 10 here to save memory
+        Map<String, Integer> counts = new HashMap<>();
+    }
+
+    private final TrieNode root;
+    private final Map<String, Integer> globalFrequencies;
+
+    public AutocompleteSystem() {
+        this.root = new TrieNode();
+        this.globalFrequencies = new ConcurrentHashMap<>();
+    }
+
+    /**
+     * Updates or inserts a query into the system.
+     * Complexity: O(L) where L is query length.
+     */
+    public void updateFrequency(String query) {
+        globalFrequencies.put(query, globalFrequencies.getOrDefault(query, 0) + 1);
+        int newFreq = globalFrequencies.get(query);
+
+        TrieNode curr = root;
+        for (char c : query.toCharArray()) {
+            curr.children.putIfAbsent(c, new TrieNode());
+            curr = curr.children.get(c);
+            
+            // Update the local frequency count at this node
+            curr.counts.put(query, newFreq);
+        }
+    }
+
+    /**
+     * Returns top 10 suggestions for a given prefix.
+     * Complexity: O(L) to find prefix + O(K log K) to sort top 10.
+     */
+    public List<String> search(String prefix) {
+        long startTime = System.nanoTime();
+        TrieNode curr = root;
+        
+        // 1. Navigate to the end of the prefix
+        for (char c : prefix.toCharArray()) {
+            if (!curr.children.containsKey(c)) {
+                return Collections.emptyList();
+            }
+            curr = curr.children.get(c);
+        }
+
+        // 2. Extract top 10 using a PriorityQueue (Min-Heap)
+        PriorityQueue<Map.Entry<String, Integer>> pq = new PriorityQueue<>(
+            Comparator.comparingInt(Map.Entry::getValue)
+        );
+
+        for (Map.Entry<String, Integer> entry : curr.counts.entrySet()) {
+            pq.offer(entry);
+            if (pq.size() > 10) pq.poll();
+        }
+
+        // 3. Prepare result list
+        List<String> results = new ArrayList<>();
+        while (!pq.isEmpty()) {
+            results.add(0, pq.poll().getKey());
+        }
+
+        double duration = (System.nanoTime() - startTime) / 1_000_000.0;
+        System.out.printf("Search for '%s' took %.2fms%n", prefix, duration);
+        return results;
+    }
+
+    public static void main(String[] args) {
+        AutocompleteSystem engine = new AutocompleteSystem();
+
+        // Seed data
+        engine.updateFrequency("java tutorial");
+        engine.updateFrequency("java tutorial"); // Increment freq
+        engine.updateFrequency("javascript");
+        engine.updateFrequency("java download");
+        engine.updateFrequency("jdk 21 features");
+
+        // Simulate search
+        List<String> suggestions = engine.search("jav");
+        for (int i = 0; i < suggestions.size(); i++) {
+            System.out.println((i + 1) + ". " + suggestions.get(i));
+        }
+        
+        // Update trending
+        System.out.println("\nUpdating 'jdk 21 features'...");
+        engine.updateFrequency("jdk 21 features");
+        engine.updateFrequency("jdk 21 features");
+        System.out.println("New suggestions for 'jdk': " + engine.search("jdk"));
+    }
+}

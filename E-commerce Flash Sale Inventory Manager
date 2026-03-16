@@ -1,0 +1,73 @@
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class FlashSaleManager {
+    // Maps Product ID to current stock count
+    private final ConcurrentHashMap<String, AtomicInteger> inventory = new ConcurrentHashMap<>();
+    
+    // Maps Product ID to a FIFO queue of User IDs
+    private final ConcurrentHashMap<String, LinkedBlockingQueue<Integer>> waitingLists = new ConcurrentHashMap<>();
+
+    /**
+     * Initializes stock for a specific product.
+     */
+    public void addProduct(String productId, int initialStock) {
+        inventory.put(productId, new AtomicInteger(initialStock));
+        waitingLists.put(productId, new LinkedBlockingQueue<>());
+    }
+
+    /**
+     * Checks stock availability in O(1) time.
+     */
+    public int checkStock(String productId) {
+        AtomicInteger stock = inventory.get(productId);
+        return (stock != null) ? stock.get() : 0;
+    }
+
+    /**
+     * Processes purchase requests safely using atomic operations.
+     */
+    public String purchaseItem(String productId, int userId) {
+        AtomicInteger stock = inventory.get(productId);
+
+        if (stock == null) return "Product not found";
+
+        // Atomic update to prevent overselling
+        // updateAndGet ensures thread safety during high-concurrency decrements
+        int remaining = stock.getAndUpdate(current -> current > 0 ? current - 1 : 0);
+
+        if (remaining > 0) {
+            return "Success, " + (remaining - 1) + " units remaining";
+        } else {
+            // Stock is 0, add user to the FIFO waiting list
+            LinkedBlockingQueue<Integer> queue = waitingLists.get(productId);
+            queue.offer(userId);
+            
+            // Get position in queue (Note: size() in Concurrent queues is O(n))
+            int position = queue.size();
+            return "Added to waiting list, position #" + position;
+        }
+    }
+
+    public static void main(String[] args) {
+        FlashSaleManager manager = new FlashSaleManager();
+        String item = "IPHONE15_256GB";
+        manager.addProduct(item, 100);
+
+        // Scenario Simulation
+        System.out.println("Initial Stock: " + manager.checkStock(item));
+        
+        // Simulating successful purchases
+        System.out.println(manager.purchaseItem(item, 12345));
+        System.out.println(manager.purchaseItem(item, 67890));
+
+        // Simulating stock depletion
+        for (int i = 0; i < 98; i++) {
+            manager.purchaseItem(item, i);
+        }
+
+        // This request triggers the waiting list
+        System.out.println(manager.purchaseItem(item, 99999));
+    }
+}
